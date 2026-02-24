@@ -13,7 +13,7 @@ def main(question: str):
     # Embeddings 
     embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
 
-    # Pinecone vector store
+    # Pinecone
     index_name = os.getenv("PINECONE_INDEX_NAME")
     if not index_name:
         raise RuntimeError("Missing PINECONE_INDEX_NAME in .env")
