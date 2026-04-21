@@ -6,43 +6,10 @@ from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_pinecone import PineconeVectorStore
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_openai import ChatOpenAI
-from sentence_transformers import CrossEncoder
 
 load_dotenv()
 
-def doc_label(d):
-    """Short label for a document: source_key or first 60 chars of text."""
-    md = d.metadata or {}
-    key = md.get("source_key", "")
-    return key if key else d.page_content[:60] + "..."
-
-
-def print_ranking_comparison(original_docs, scores, top_n):
-    """Show all candidates with rerank scores, marking which were kept/filtered."""
-    ranked = sorted(
-        zip(scores, range(len(original_docs)), original_docs),
-        key=lambda x: x[0], reverse=True,
-    )
-
-    print("\n" + "=" * 75)
-    print("RANKING COMPARISON: Vector Search vs. Cross-Encoder Rerank")
-    print("=" * 75)
-    print(f"\n{'Rerank #':<10} {'Vector #':<10} {'Score':<10} {'Status':<12} Source")
-    print("-" * 75)
-    for new_rank, (score, orig_idx, d) in enumerate(ranked, 1):
-        old_rank = orig_idx + 1
-        kept = new_rank <= top_n
-        status = "KEPT" if kept else "FILTERED"
-        label = doc_label(d)
-        line = f"  {new_rank:<8} {old_rank:<10} {score:<10.4f} {status:<12} {label}"
-        if not kept:
-            line = f"\033[90m{line}\033[0m"  # dim filtered rows
-        print(line)
-
-    print()
-
-
-def main(question: str, debug=False):
+def main(question: str):
     # Embeddings
     embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
 
@@ -58,20 +25,13 @@ def main(question: str, debug=False):
         text_key="text",
     )
 
-    retriever = vectorstore.as_retriever(search_kwargs={"k": 8})
-
-    # Get original vector search results
-    original_docs = retriever.invoke(question)
-
-    # Rerank with cross-encoder for better relevance
-    cross_encoder = CrossEncoder("cross-encoder/ms-marco-MiniLM-L-6-v2")
-    pairs = [[question, d.page_content] for d in original_docs]
-    scores = cross_encoder.predict(pairs)
-    ranked = sorted(zip(scores, original_docs), key=lambda x: x[0], reverse=True)
-    docs = [d for _, d in ranked[:4]]
-
-    if debug:
-        print_ranking_comparison(original_docs, scores, top_n=4)
+    # No reranking: MiniLM cosine search already achieves 90% hit rate and
+    # 0.875 MRR@4. Cross-encoder reranking showed 0% improvement in both
+    # hit rate and MRR in benchmarks. LLM-based reranking (RankLLM-Gemini)
+    # improved MRR to 1.0 but adds ~6.5s latency per query, not justified
+    # for this use case.
+    retriever = vectorstore.as_retriever(search_kwargs={"k": 4})
+    docs = retriever.invoke(question)
 
     # Format context with URL citations
     context_parts = []
@@ -125,9 +85,7 @@ def main(question: str, debug=False):
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:
-        print('Usage: python src/ask_langchain.py "your question here" [--debug]')
+        print('Usage: python src/ask_langchain.py "your question here"')
         raise SystemExit(1)
 
-    show_debug = "--debug" in sys.argv
-    query = [a for a in sys.argv[1:] if a != "--debug"][0]
-    main(query, debug=show_debug)
+    main(sys.argv[1])
